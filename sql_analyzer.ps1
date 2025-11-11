@@ -81,13 +81,23 @@ $buttonRun.Add_Click({
         Append-ColoredText $richTextBoxOutput "`r`nDatabases: $($server.Databases.Count)" ([System.Drawing.Color]::Blue) $true
         
         foreach ($db in $server.Databases) {
+            # Count only user-created objects (exclude system objects)
+            $userViews = ($db.Views | Where-Object {$_.IsSystemObject -eq $false}).Count
+            $userFunctions = ($db.UserDefinedFunctions | Where-Object {$_.IsSystemObject -eq $false}).Count
+            
+            # Count table triggers (database-level triggers are rare)
+            $triggerCount = 0
+            foreach ($table in $db.Tables) {
+                $triggerCount += $table.Triggers.Count
+            }
+            
             Append-ColoredText $richTextBoxOutput "`r`nDatabase: $($db.Name)" ([System.Drawing.Color]::DarkRed) $true
             Append-ColoredText $richTextBoxOutput "  Size: $([math]::Round($db.Size,2)) MB" ([System.Drawing.Color]::DarkGreen) $true
             Append-ColoredText $richTextBoxOutput "  Data Files: $($db.FileGroups.Files.Count)" ([System.Drawing.Color]::DarkBlue) $true
             Append-ColoredText $richTextBoxOutput "  Stored Procedures: $($db.StoredProcedures.Count)" ([System.Drawing.Color]::DarkMagenta) $true
-            Append-ColoredText $richTextBoxOutput "  Views: $($db.Views.Count)" ([System.Drawing.Color]::DarkCyan) $true
-            Append-ColoredText $richTextBoxOutput "  User Defined Functions: $($db.UserDefinedFunctions.Count)" ([System.Drawing.Color]::Chocolate) $true
-            Append-ColoredText $richTextBoxOutput "  Triggers: $($db.Triggers.Count)" ([System.Drawing.Color]::DarkGoldenrod) $true
+            Append-ColoredText $richTextBoxOutput "  User Views: $userViews" ([System.Drawing.Color]::DarkCyan) $true
+            Append-ColoredText $richTextBoxOutput "  User Defined Functions: $userFunctions" ([System.Drawing.Color]::Chocolate) $true
+            Append-ColoredText $richTextBoxOutput "  Triggers: $triggerCount" ([System.Drawing.Color]::DarkGoldenrod) $true
         }
         
         Append-ColoredText $richTextBoxOutput "`r`nLogins:" ([System.Drawing.Color]::Purple) $true
