@@ -67,6 +67,9 @@ $buttonRun.Add_Click({
         [System.Reflection.Assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo") | Out-Null
         $server = New-Object Microsoft.SqlServer.Management.Smo.Server $serverName
         
+        # Set connection to allow basic enumeration
+        $server.ConnectionContext.ConnectTimeout = 30
+        
         $richTextBoxOutput.Clear()
         Append-ColoredText $richTextBoxOutput "SQL Server Analysis for: $serverName" ([System.Drawing.Color]::Blue) $true
         Append-ColoredText $richTextBoxOutput "Server Name: $($server.Name)" ([System.Drawing.Color]::DarkGreen) $true
@@ -78,35 +81,100 @@ $buttonRun.Add_Click({
         Append-ColoredText $richTextBoxOutput "Physical Memory: $($server.PhysicalMemory) MB" ([System.Drawing.Color]::DarkGreen) $true
         Append-ColoredText $richTextBoxOutput "Max Server Memory: $($server.Configuration.MaxServerMemory.RunValue) MB" ([System.Drawing.Color]::DarkGreen) $true
         Append-ColoredText $richTextBoxOutput "Min Server Memory: $($server.Configuration.MinServerMemory.RunValue) MB" ([System.Drawing.Color]::DarkGreen) $true
-        Append-ColoredText $richTextBoxOutput "`r`nDatabases: $($server.Databases.Count)" ([System.Drawing.Color]::Blue) $true
         
-        foreach ($db in $server.Databases) {
-            # Count only user-created objects (exclude system objects)
-            $userViews = ($db.Views | Where-Object {$_.IsSystemObject -eq $false}).Count
-            $userFunctions = ($db.UserDefinedFunctions | Where-Object {$_.IsSystemObject -eq $false}).Count
-            
-            # Count table triggers (database-level triggers are rare)
-            $triggerCount = 0
-            foreach ($table in $db.Tables) {
-                $triggerCount += $table.Triggers.Count
+        # System databases to exclude
+        $systemDatabases = @('master', 'model', 'msdb', 'tempdb')
+        
+        # Filter out system databases
+        $userDatabases = $server.Databases | Where-Object { $systemDatabases -notcontains $_.Name }
+        
+        Append-ColoredText $richTextBoxOutput "`r`nUser Databases: $($userDatabases.Count)" ([System.Drawing.Color]::Blue) $true
+        Append-ColoredText $richTextBoxOutput "Total Databases (including system): $($server.Databases.Count)" ([System.Drawing.Color]::Blue) $false
+        
+        foreach ($db in $userDatabases) {
+            try {
+                Append-ColoredText $richTextBoxOutput "`r`nDatabase: $($db.Name)" ([System.Drawing.Color]::DarkRed) $true
+                Append-ColoredText $richTextBoxOutput "  Size: $([math]::Round($db.Size,2)) MB" ([System.Drawing.Color]::DarkGreen) $true
+                
+                # Safely count data files
+                try {
+                    $dataFileCount = 0
+                    foreach ($fg in $db.FileGroups) {
+                        $dataFileCount += $fg.Files.Count
+                    }
+                    Append-ColoredText $richTextBoxOutput "  Data Files: $dataFileCount" ([System.Drawing.Color]::DarkBlue) $true
+                } catch {
+                    Append-ColoredText $richTextBoxOutput "  Data Files: Unable to retrieve" ([System.Drawing.Color]::DarkBlue) $true
+                }
+                
+                # Safely count stored procedures (excluding system objects)
+                try {
+                    $userSPs = 0
+                    foreach ($sp in $db.StoredProcedures) {
+                        if (-not $sp.IsSystemObject) {
+                            $userSPs++
+                        }
+                    }
+                    Append-ColoredText $richTextBoxOutput "  User Stored Procedures: $userSPs" ([System.Drawing.Color]::DarkMagenta) $true
+                } catch {
+                    Append-ColoredText $richTextBoxOutput "  User Stored Procedures: Unable to retrieve" ([System.Drawing.Color]::DarkMagenta) $true
+                }
+                
+                # Safely count user views
+                try {
+                    $userViews = 0
+                    foreach ($view in $db.Views) {
+                        if (-not $view.IsSystemObject) {
+                            $userViews++
+                        }
+                    }
+                    Append-ColoredText $richTextBoxOutput "  User Views: $userViews" ([System.Drawing.Color]::DarkCyan) $true
+                } catch {
+                    Append-ColoredText $richTextBoxOutput "  User Views: Unable to retrieve" ([System.Drawing.Color]::DarkCyan) $true
+                }
+                
+                # Safely count user defined functions
+                try {
+                    $userFunctions = 0
+                    foreach ($func in $db.UserDefinedFunctions) {
+                        if (-not $func.IsSystemObject) {
+                            $userFunctions++
+                        }
+                    }
+                    Append-ColoredText $richTextBoxOutput "  User Defined Functions: $userFunctions" ([System.Drawing.Color]::Chocolate) $true
+                } catch {
+                    Append-ColoredText $richTextBoxOutput "  User Defined Functions: Unable to retrieve" ([System.Drawing.Color]::Chocolate) $true
+                }
+                
+                # Safely count triggers
+                try {
+                    $triggerCount = 0
+                    foreach ($table in $db.Tables) {
+                        if (-not $table.IsSystemObject) {
+                            $triggerCount += $table.Triggers.Count
+                        }
+                    }
+                    Append-ColoredText $richTextBoxOutput "  Triggers: $triggerCount" ([System.Drawing.Color]::DarkGoldenrod) $true
+                } catch {
+                    Append-ColoredText $richTextBoxOutput "  Triggers: Unable to retrieve" ([System.Drawing.Color]::DarkGoldenrod) $true
+                }
+                
+            } catch {
+                Append-ColoredText $richTextBoxOutput "  Error retrieving database details: $($_.Exception.Message)" ([System.Drawing.Color]::Red) $false
             }
-            
-            Append-ColoredText $richTextBoxOutput "`r`nDatabase: $($db.Name)" ([System.Drawing.Color]::DarkRed) $true
-            Append-ColoredText $richTextBoxOutput "  Size: $([math]::Round($db.Size,2)) MB" ([System.Drawing.Color]::DarkGreen) $true
-            Append-ColoredText $richTextBoxOutput "  Data Files: $($db.FileGroups.Files.Count)" ([System.Drawing.Color]::DarkBlue) $true
-            Append-ColoredText $richTextBoxOutput "  Stored Procedures: $($db.StoredProcedures.Count)" ([System.Drawing.Color]::DarkMagenta) $true
-            Append-ColoredText $richTextBoxOutput "  User Views: $userViews" ([System.Drawing.Color]::DarkCyan) $true
-            Append-ColoredText $richTextBoxOutput "  User Defined Functions: $userFunctions" ([System.Drawing.Color]::Chocolate) $true
-            Append-ColoredText $richTextBoxOutput "  Triggers: $triggerCount" ([System.Drawing.Color]::DarkGoldenrod) $true
         }
         
         Append-ColoredText $richTextBoxOutput "`r`nLogins:" ([System.Drawing.Color]::Purple) $true
-        foreach ($login in $server.Logins) {
-            Append-ColoredText $richTextBoxOutput "  $($login.Name) ($($login.LoginType))" ([System.Drawing.Color]::DarkSlateBlue) $false
+        try {
+            foreach ($login in $server.Logins) {
+                Append-ColoredText $richTextBoxOutput "  $($login.Name) ($($login.LoginType))" ([System.Drawing.Color]::DarkSlateBlue) $false
+            }
+        } catch {
+            Append-ColoredText $richTextBoxOutput "  Unable to retrieve logins: $($_.Exception.Message)" ([System.Drawing.Color]::Red) $false
         }
         
     } catch {
-        [System.Windows.Forms.MessageBox]::Show("Error connecting to SQL Server: $_", "Connection Error")
+        [System.Windows.Forms.MessageBox]::Show("Error connecting to SQL Server: $($_.Exception.Message)", "Connection Error")
     }
 })
 
