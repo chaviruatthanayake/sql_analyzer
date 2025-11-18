@@ -106,8 +106,18 @@ $buttonRun.Add_Click({
             $userDatabaseNames = $server.Databases | Where-Object { $systemDatabases -notcontains $_.Name } | Select-Object -ExpandProperty Name
         }
         
+        # Get total database count using SQL query
+        $totalDbCount = 0
+        try {
+            $totalDbQuery = "SELECT COUNT(*) AS DbCount FROM sys.databases"
+            $totalDbResult = $server.ConnectionContext.ExecuteWithResults($totalDbQuery)
+            $totalDbCount = $totalDbResult.Tables[0].Rows[0]["DbCount"]
+        } catch {
+            $totalDbCount = "Unknown"
+        }
+        
         Append-ColoredText $richTextBoxOutput "`r`nUser Databases: $($userDatabaseNames.Count)" ([System.Drawing.Color]::Blue) $true
-        Append-ColoredText $richTextBoxOutput "Total Databases (including system): $($server.Databases.Count)" ([System.Drawing.Color]::Blue) $false
+        Append-ColoredText $richTextBoxOutput "Total Databases (including system): $totalDbCount" ([System.Drawing.Color]::Blue) $false
         
         foreach ($dbName in $userDatabaseNames) {
             try {
