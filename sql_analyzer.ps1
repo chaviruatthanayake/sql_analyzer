@@ -123,12 +123,11 @@ $buttonRun.Add_Click({
             try {
                 Append-ColoredText $richTextBoxOutput "`r`nDatabase: $dbName" ([System.Drawing.Color]::DarkRed) $true
                 
-                # Use SQL queries instead of SMO collections to avoid enumeration errors
-                $server.ConnectionContext.DatabaseName = $dbName
+                # Use fully qualified queries to avoid needing to switch databases
                 
                 # Get database size
                 try {
-                    $sizeQuery = "SELECT SUM(CAST(size AS BIGINT) * 8 / 1024.0) AS SizeMB FROM sys.database_files"
+                    $sizeQuery = "SELECT SUM(CAST(size AS BIGINT) * 8 / 1024.0) AS SizeMB FROM [$dbName].sys.database_files"
                     $sizeResult = $server.ConnectionContext.ExecuteWithResults($sizeQuery)
                     $sizeMB = [math]::Round($sizeResult.Tables[0].Rows[0]["SizeMB"], 2)
                     Append-ColoredText $richTextBoxOutput "  Size: $sizeMB MB" ([System.Drawing.Color]::DarkGreen) $true
@@ -138,7 +137,7 @@ $buttonRun.Add_Click({
                 
                 # Get data file count
                 try {
-                    $fileQuery = "SELECT COUNT(*) AS FileCount FROM sys.database_files WHERE type = 0"
+                    $fileQuery = "SELECT COUNT(*) AS FileCount FROM [$dbName].sys.database_files WHERE type = 0"
                     $fileResult = $server.ConnectionContext.ExecuteWithResults($fileQuery)
                     $fileCount = $fileResult.Tables[0].Rows[0]["FileCount"]
                     Append-ColoredText $richTextBoxOutput "  Data Files: $fileCount" ([System.Drawing.Color]::DarkBlue) $true
@@ -148,7 +147,7 @@ $buttonRun.Add_Click({
                 
                 # Get stored procedure count (user objects only)
                 try {
-                    $spQuery = "SELECT COUNT(*) AS SPCount FROM sys.procedures WHERE is_ms_shipped = 0"
+                    $spQuery = "SELECT COUNT(*) AS SPCount FROM [$dbName].sys.procedures WHERE is_ms_shipped = 0"
                     $spResult = $server.ConnectionContext.ExecuteWithResults($spQuery)
                     $spCount = $spResult.Tables[0].Rows[0]["SPCount"]
                     Append-ColoredText $richTextBoxOutput "  User Stored Procedures: $spCount" ([System.Drawing.Color]::DarkMagenta) $true
@@ -158,7 +157,7 @@ $buttonRun.Add_Click({
                 
                 # Get view count (user objects only)
                 try {
-                    $viewQuery = "SELECT COUNT(*) AS ViewCount FROM sys.views WHERE is_ms_shipped = 0"
+                    $viewQuery = "SELECT COUNT(*) AS ViewCount FROM [$dbName].sys.views WHERE is_ms_shipped = 0"
                     $viewResult = $server.ConnectionContext.ExecuteWithResults($viewQuery)
                     $viewCount = $viewResult.Tables[0].Rows[0]["ViewCount"]
                     Append-ColoredText $richTextBoxOutput "  User Views: $viewCount" ([System.Drawing.Color]::DarkCyan) $true
@@ -168,7 +167,7 @@ $buttonRun.Add_Click({
                 
                 # Get user defined function count
                 try {
-                    $funcQuery = "SELECT COUNT(*) AS FuncCount FROM sys.objects WHERE type IN ('FN', 'IF', 'TF') AND is_ms_shipped = 0"
+                    $funcQuery = "SELECT COUNT(*) AS FuncCount FROM [$dbName].sys.objects WHERE type IN ('FN', 'IF', 'TF') AND is_ms_shipped = 0"
                     $funcResult = $server.ConnectionContext.ExecuteWithResults($funcQuery)
                     $funcCount = $funcResult.Tables[0].Rows[0]["FuncCount"]
                     Append-ColoredText $richTextBoxOutput "  User Defined Functions: $funcCount" ([System.Drawing.Color]::Chocolate) $true
@@ -178,7 +177,7 @@ $buttonRun.Add_Click({
                 
                 # Get trigger count
                 try {
-                    $triggerQuery = "SELECT COUNT(*) AS TriggerCount FROM sys.triggers WHERE parent_class = 1 AND is_ms_shipped = 0"
+                    $triggerQuery = "SELECT COUNT(*) AS TriggerCount FROM [$dbName].sys.triggers WHERE parent_class = 1 AND is_ms_shipped = 0"
                     $triggerResult = $server.ConnectionContext.ExecuteWithResults($triggerQuery)
                     $triggerCount = $triggerResult.Tables[0].Rows[0]["TriggerCount"]
                     Append-ColoredText $richTextBoxOutput "  Triggers: $triggerCount" ([System.Drawing.Color]::DarkGoldenrod) $true
@@ -191,12 +190,9 @@ $buttonRun.Add_Click({
             }
         }
         
-        # Reset to master database for login queries
-        $server.ConnectionContext.DatabaseName = "master"
-        
         Append-ColoredText $richTextBoxOutput "`r`nLogins:" ([System.Drawing.Color]::Purple) $true
         try {
-            # Use SQL query to get logins instead of SMO collection
+            # Use fully qualified query - no need to switch databases
             $loginQuery = @"
 SELECT 
     name,
@@ -206,7 +202,7 @@ SELECT
         WHEN 'WINDOWS_GROUP' THEN 'WindowsGroup'
         ELSE type_desc
     END AS LoginType
-FROM sys.server_principals
+FROM master.sys.server_principals
 WHERE type IN ('S', 'U', 'G')
     AND name NOT LIKE '##%'
     AND name NOT LIKE 'NT %'
