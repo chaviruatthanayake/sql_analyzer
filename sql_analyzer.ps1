@@ -67,8 +67,16 @@ $buttonRun.Add_Click({
         [System.Reflection.Assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo") | Out-Null
         $server = New-Object Microsoft.SqlServer.Management.Smo.Server $serverName
         
-        # Set connection to allow basic enumeration
+        # Set connection properties to avoid enumeration issues
         $server.ConnectionContext.ConnectTimeout = 30
+        $server.ConnectionContext.StatementTimeout = 30
+        
+        # Set default init fields to minimize property fetching
+        $server.SetDefaultInitFields([Microsoft.SqlServer.Management.Smo.Database], $false)
+        $server.SetDefaultInitFields([Microsoft.SqlServer.Management.Smo.Table], $false)
+        $server.SetDefaultInitFields([Microsoft.SqlServer.Management.Smo.StoredProcedure], $false)
+        $server.SetDefaultInitFields([Microsoft.SqlServer.Management.Smo.View], $false)
+        $server.SetDefaultInitFields([Microsoft.SqlServer.Management.Smo.UserDefinedFunction], $false)
         
         $richTextBoxOutput.Clear()
         Append-ColoredText $richTextBoxOutput "SQL Server Analysis for: $serverName" ([System.Drawing.Color]::Blue) $true
@@ -85,75 +93,84 @@ $buttonRun.Add_Click({
         # System databases to exclude
         $systemDatabases = @('master', 'model', 'msdb', 'tempdb')
         
-        # Filter out system databases
-        $userDatabases = $server.Databases | Where-Object { $systemDatabases -notcontains $_.Name }
+        # Get list of user databases using SQL query instead of SMO enumeration
+        $userDatabaseNames = @()
+        try {
+            $query = "SELECT name FROM sys.databases WHERE name NOT IN ('master', 'model', 'msdb', 'tempdb') ORDER BY name"
+            $result = $server.ConnectionContext.ExecuteWithResults($query)
+            foreach ($row in $result.Tables[0].Rows) {
+                $userDatabaseNames += $row["name"]
+            }
+        } catch {
+            # Fallback to SMO if query fails
+            $userDatabaseNames = $server.Databases | Where-Object { $systemDatabases -notcontains $_.Name } | Select-Object -ExpandProperty Name
+        }
         
-        Append-ColoredText $richTextBoxOutput "`r`nUser Databases: $($userDatabases.Count)" ([System.Drawing.Color]::Blue) $true
+        Append-ColoredText $richTextBoxOutput "`r`nUser Databases: $($userDatabaseNames.Count)" ([System.Drawing.Color]::Blue) $true
         Append-ColoredText $richTextBoxOutput "Total Databases (including system): $($server.Databases.Count)" ([System.Drawing.Color]::Blue) $false
         
-        foreach ($db in $userDatabases) {
+        foreach ($dbName in $userDatabaseNames) {
             try {
-                Append-ColoredText $richTextBoxOutput "`r`nDatabase: $($db.Name)" ([System.Drawing.Color]::DarkRed) $true
-                Append-ColoredText $richTextBoxOutput "  Size: $([math]::Round($db.Size,2)) MB" ([System.Drawing.Color]::DarkGreen) $true
+                Append-ColoredText $richTextBoxOutput "`r`nDatabase: $dbName" ([System.Drawing.Color]::DarkRed) $true
                 
-                # Safely count data files
+                # Use SQL queries instead of SMO collections to avoid enumeration errors
+                $server.ConnectionContext.DatabaseName = $dbName
+                
+                # Get database size
                 try {
-                    $dataFileCount = 0
-                    foreach ($fg in $db.FileGroups) {
-                        $dataFileCount += $fg.Files.Count
-                    }
-                    Append-ColoredText $richTextBoxOutput "  Data Files: $dataFileCount" ([System.Drawing.Color]::DarkBlue) $true
+                    $sizeQuery = "SELECT SUM(CAST(size AS BIGINT) * 8 / 1024.0) AS SizeMB FROM sys.database_files"
+                    $sizeResult = $server.ConnectionContext.ExecuteWithResults($sizeQuery)
+                    $sizeMB = [math]::Round($sizeResult.Tables[0].Rows[0]["SizeMB"], 2)
+                    Append-ColoredText $richTextBoxOutput "  Size: $sizeMB MB" ([System.Drawing.Color]::DarkGreen) $true
+                } catch {
+                    Append-ColoredText $richTextBoxOutput "  Size: Unable to retrieve" ([System.Drawing.Color]::DarkGreen) $true
+                }
+                
+                # Get data file count
+                try {
+                    $fileQuery = "SELECT COUNT(*) AS FileCount FROM sys.database_files WHERE type = 0"
+                    $fileResult = $server.ConnectionContext.ExecuteWithResults($fileQuery)
+                    $fileCount = $fileResult.Tables[0].Rows[0]["FileCount"]
+                    Append-ColoredText $richTextBoxOutput "  Data Files: $fileCount" ([System.Drawing.Color]::DarkBlue) $true
                 } catch {
                     Append-ColoredText $richTextBoxOutput "  Data Files: Unable to retrieve" ([System.Drawing.Color]::DarkBlue) $true
                 }
                 
-                # Safely count stored procedures (excluding system objects)
+                # Get stored procedure count (user objects only)
                 try {
-                    $userSPs = 0
-                    foreach ($sp in $db.StoredProcedures) {
-                        if (-not $sp.IsSystemObject) {
-                            $userSPs++
-                        }
-                    }
-                    Append-ColoredText $richTextBoxOutput "  User Stored Procedures: $userSPs" ([System.Drawing.Color]::DarkMagenta) $true
+                    $spQuery = "SELECT COUNT(*) AS SPCount FROM sys.procedures WHERE is_ms_shipped = 0"
+                    $spResult = $server.ConnectionContext.ExecuteWithResults($spQuery)
+                    $spCount = $spResult.Tables[0].Rows[0]["SPCount"]
+                    Append-ColoredText $richTextBoxOutput "  User Stored Procedures: $spCount" ([System.Drawing.Color]::DarkMagenta) $true
                 } catch {
                     Append-ColoredText $richTextBoxOutput "  User Stored Procedures: Unable to retrieve" ([System.Drawing.Color]::DarkMagenta) $true
                 }
                 
-                # Safely count user views
+                # Get view count (user objects only)
                 try {
-                    $userViews = 0
-                    foreach ($view in $db.Views) {
-                        if (-not $view.IsSystemObject) {
-                            $userViews++
-                        }
-                    }
-                    Append-ColoredText $richTextBoxOutput "  User Views: $userViews" ([System.Drawing.Color]::DarkCyan) $true
+                    $viewQuery = "SELECT COUNT(*) AS ViewCount FROM sys.views WHERE is_ms_shipped = 0"
+                    $viewResult = $server.ConnectionContext.ExecuteWithResults($viewQuery)
+                    $viewCount = $viewResult.Tables[0].Rows[0]["ViewCount"]
+                    Append-ColoredText $richTextBoxOutput "  User Views: $viewCount" ([System.Drawing.Color]::DarkCyan) $true
                 } catch {
                     Append-ColoredText $richTextBoxOutput "  User Views: Unable to retrieve" ([System.Drawing.Color]::DarkCyan) $true
                 }
                 
-                # Safely count user defined functions
+                # Get user defined function count
                 try {
-                    $userFunctions = 0
-                    foreach ($func in $db.UserDefinedFunctions) {
-                        if (-not $func.IsSystemObject) {
-                            $userFunctions++
-                        }
-                    }
-                    Append-ColoredText $richTextBoxOutput "  User Defined Functions: $userFunctions" ([System.Drawing.Color]::Chocolate) $true
+                    $funcQuery = "SELECT COUNT(*) AS FuncCount FROM sys.objects WHERE type IN ('FN', 'IF', 'TF') AND is_ms_shipped = 0"
+                    $funcResult = $server.ConnectionContext.ExecuteWithResults($funcQuery)
+                    $funcCount = $funcResult.Tables[0].Rows[0]["FuncCount"]
+                    Append-ColoredText $richTextBoxOutput "  User Defined Functions: $funcCount" ([System.Drawing.Color]::Chocolate) $true
                 } catch {
                     Append-ColoredText $richTextBoxOutput "  User Defined Functions: Unable to retrieve" ([System.Drawing.Color]::Chocolate) $true
                 }
                 
-                # Safely count triggers
+                # Get trigger count
                 try {
-                    $triggerCount = 0
-                    foreach ($table in $db.Tables) {
-                        if (-not $table.IsSystemObject) {
-                            $triggerCount += $table.Triggers.Count
-                        }
-                    }
+                    $triggerQuery = "SELECT COUNT(*) AS TriggerCount FROM sys.triggers WHERE parent_class = 1 AND is_ms_shipped = 0"
+                    $triggerResult = $server.ConnectionContext.ExecuteWithResults($triggerQuery)
+                    $triggerCount = $triggerResult.Tables[0].Rows[0]["TriggerCount"]
                     Append-ColoredText $richTextBoxOutput "  Triggers: $triggerCount" ([System.Drawing.Color]::DarkGoldenrod) $true
                 } catch {
                     Append-ColoredText $richTextBoxOutput "  Triggers: Unable to retrieve" ([System.Drawing.Color]::DarkGoldenrod) $true
@@ -164,10 +181,30 @@ $buttonRun.Add_Click({
             }
         }
         
+        # Reset to master database for login queries
+        $server.ConnectionContext.DatabaseName = "master"
+        
         Append-ColoredText $richTextBoxOutput "`r`nLogins:" ([System.Drawing.Color]::Purple) $true
         try {
-            foreach ($login in $server.Logins) {
-                Append-ColoredText $richTextBoxOutput "  $($login.Name) ($($login.LoginType))" ([System.Drawing.Color]::DarkSlateBlue) $false
+            # Use SQL query to get logins instead of SMO collection
+            $loginQuery = @"
+SELECT 
+    name,
+    CASE type_desc
+        WHEN 'SQL_LOGIN' THEN 'SqlLogin'
+        WHEN 'WINDOWS_LOGIN' THEN 'WindowsUser'
+        WHEN 'WINDOWS_GROUP' THEN 'WindowsGroup'
+        ELSE type_desc
+    END AS LoginType
+FROM sys.server_principals
+WHERE type IN ('S', 'U', 'G')
+    AND name NOT LIKE '##%'
+    AND name NOT LIKE 'NT %'
+ORDER BY name
+"@
+            $loginResult = $server.ConnectionContext.ExecuteWithResults($loginQuery)
+            foreach ($row in $loginResult.Tables[0].Rows) {
+                Append-ColoredText $richTextBoxOutput "  $($row['name']) ($($row['LoginType']))" ([System.Drawing.Color]::DarkSlateBlue) $false
             }
         } catch {
             Append-ColoredText $richTextBoxOutput "  Unable to retrieve logins: $($_.Exception.Message)" ([System.Drawing.Color]::Red) $false
