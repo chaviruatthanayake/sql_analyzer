@@ -123,21 +123,25 @@ $buttonRun.Add_Click({
             try {
                 Append-ColoredText $richTextBoxOutput "`r`nDatabase: $dbName" ([System.Drawing.Color]::DarkRed) $true
                 
-                # Use fully qualified queries to avoid needing to switch databases
+                # Use dynamic SQL with sp_executesql to properly query each database
                 
                 # Get database size
                 try {
-                    $sizeQuery = "SELECT SUM(CAST(size AS BIGINT) * 8 / 1024.0) AS SizeMB FROM [$dbName].sys.database_files"
+                    $sizeQuery = "EXEC [$dbName]..sp_executesql N'SELECT SUM(CAST(size AS BIGINT) * 8 / 1024.0) AS SizeMB FROM sys.database_files'"
                     $sizeResult = $server.ConnectionContext.ExecuteWithResults($sizeQuery)
-                    $sizeMB = [math]::Round($sizeResult.Tables[0].Rows[0]["SizeMB"], 2)
-                    Append-ColoredText $richTextBoxOutput "  Size: $sizeMB MB" ([System.Drawing.Color]::DarkGreen) $true
+                    if ($sizeResult.Tables[0].Rows.Count -gt 0) {
+                        $sizeMB = [math]::Round($sizeResult.Tables[0].Rows[0]["SizeMB"], 2)
+                        Append-ColoredText $richTextBoxOutput "  Size: $sizeMB MB" ([System.Drawing.Color]::DarkGreen) $true
+                    } else {
+                        Append-ColoredText $richTextBoxOutput "  Size: 0 MB" ([System.Drawing.Color]::DarkGreen) $true
+                    }
                 } catch {
-                    Append-ColoredText $richTextBoxOutput "  Size: Unable to retrieve" ([System.Drawing.Color]::DarkGreen) $true
+                    Append-ColoredText $richTextBoxOutput "  Size: Unable to retrieve ($($_.Exception.Message))" ([System.Drawing.Color]::DarkGreen) $true
                 }
                 
                 # Get data file count
                 try {
-                    $fileQuery = "SELECT COUNT(*) AS FileCount FROM [$dbName].sys.database_files WHERE type = 0"
+                    $fileQuery = "EXEC [$dbName]..sp_executesql N'SELECT COUNT(*) AS FileCount FROM sys.database_files WHERE type = 0'"
                     $fileResult = $server.ConnectionContext.ExecuteWithResults($fileQuery)
                     $fileCount = $fileResult.Tables[0].Rows[0]["FileCount"]
                     Append-ColoredText $richTextBoxOutput "  Data Files: $fileCount" ([System.Drawing.Color]::DarkBlue) $true
@@ -147,7 +151,7 @@ $buttonRun.Add_Click({
                 
                 # Get stored procedure count (user objects only)
                 try {
-                    $spQuery = "SELECT COUNT(*) AS SPCount FROM [$dbName].sys.procedures WHERE is_ms_shipped = 0"
+                    $spQuery = "EXEC [$dbName]..sp_executesql N'SELECT COUNT(*) AS SPCount FROM sys.procedures WHERE is_ms_shipped = 0'"
                     $spResult = $server.ConnectionContext.ExecuteWithResults($spQuery)
                     $spCount = $spResult.Tables[0].Rows[0]["SPCount"]
                     Append-ColoredText $richTextBoxOutput "  User Stored Procedures: $spCount" ([System.Drawing.Color]::DarkMagenta) $true
@@ -157,7 +161,7 @@ $buttonRun.Add_Click({
                 
                 # Get view count (user objects only)
                 try {
-                    $viewQuery = "SELECT COUNT(*) AS ViewCount FROM [$dbName].sys.views WHERE is_ms_shipped = 0"
+                    $viewQuery = "EXEC [$dbName]..sp_executesql N'SELECT COUNT(*) AS ViewCount FROM sys.views WHERE is_ms_shipped = 0'"
                     $viewResult = $server.ConnectionContext.ExecuteWithResults($viewQuery)
                     $viewCount = $viewResult.Tables[0].Rows[0]["ViewCount"]
                     Append-ColoredText $richTextBoxOutput "  User Views: $viewCount" ([System.Drawing.Color]::DarkCyan) $true
@@ -167,7 +171,7 @@ $buttonRun.Add_Click({
                 
                 # Get user defined function count
                 try {
-                    $funcQuery = "SELECT COUNT(*) AS FuncCount FROM [$dbName].sys.objects WHERE type IN ('FN', 'IF', 'TF') AND is_ms_shipped = 0"
+                    $funcQuery = "EXEC [$dbName]..sp_executesql N'SELECT COUNT(*) AS FuncCount FROM sys.objects WHERE type IN (''FN'', ''IF'', ''TF'') AND is_ms_shipped = 0'"
                     $funcResult = $server.ConnectionContext.ExecuteWithResults($funcQuery)
                     $funcCount = $funcResult.Tables[0].Rows[0]["FuncCount"]
                     Append-ColoredText $richTextBoxOutput "  User Defined Functions: $funcCount" ([System.Drawing.Color]::Chocolate) $true
@@ -177,7 +181,7 @@ $buttonRun.Add_Click({
                 
                 # Get trigger count
                 try {
-                    $triggerQuery = "SELECT COUNT(*) AS TriggerCount FROM [$dbName].sys.triggers WHERE parent_class = 1 AND is_ms_shipped = 0"
+                    $triggerQuery = "EXEC [$dbName]..sp_executesql N'SELECT COUNT(*) AS TriggerCount FROM sys.triggers WHERE parent_class = 1 AND is_ms_shipped = 0'"
                     $triggerResult = $server.ConnectionContext.ExecuteWithResults($triggerQuery)
                     $triggerCount = $triggerResult.Tables[0].Rows[0]["TriggerCount"]
                     Append-ColoredText $richTextBoxOutput "  Triggers: $triggerCount" ([System.Drawing.Color]::DarkGoldenrod) $true
